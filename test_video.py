@@ -2,6 +2,9 @@ import cv2
 import winsound
 from ultralytics import YOLO
 print(YOLO("best.pt").names)
+from database import init_db, log_alert
+
+init_db() #makes new register
 
 general_model = YOLO("yolov8s.pt")
 weapon_model = YOLO("best.pt")
@@ -17,6 +20,8 @@ def process_frame(img):
     
     alert_triggered = False
     alert_message = ""
+    alert_type=""
+    alert_conf=0.0
 
     threat_classes=["guns", "knife", "Violence"]
     
@@ -25,10 +30,12 @@ def process_frame(img):
         class_name = weapon_model.names[class_id]
         if class_name.lower() in threat_classes:
             alert_triggered = True
+            alert_type=class_name
+            alert_conf=float(box.conf[0])
             alert_message = "ALERT: " + class_name + " detected!"
             break
         
-    return img, alert_triggered, alert_message
+    return img, alert_triggered, alert_message, alert_type, alert_conf
 
 webcam = cv2.VideoCapture(0)
 
@@ -37,12 +44,13 @@ while True:
     if not ret:
         break
 
-    img, alert_triggered, alert_message = process_frame(img)
+    img, alert_triggered, alert_message, alert_type, alert_conf = process_frame(img)
 
     if alert_triggered:
         cv2.putText(img, alert_message,(20, 50),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
         winsound.Beep(1000, 200)
+        log_alert(alert_type, alert_conf)
 
     cv2.imshow("Surveillance System", img)
     if cv2.waitKey(1) == 27:   # ESC

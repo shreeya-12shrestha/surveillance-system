@@ -23,3 +23,11 @@ def log_alert(alert_type, confidence):
     )
     conn.commit()
     conn.close()
+
+def count_after_hours():
+    conn = sqlite3.connect("alerts.db")
+    count = conn.execute(
+        "SELECT COUNT(*) FROM alerts WHERE alert_type = 'after-hours'"
+    ).fetchone()[0]
+    conn.close()
+    return count

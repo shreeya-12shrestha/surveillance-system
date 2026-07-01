@@ -5,7 +5,7 @@ general_model = YOLO("yolov8s.pt")
 weapon_model = YOLO("best.pt")
 
 # photo padhne (webcam haina)
-img = cv2.imread("man.jpg")
+img = cv2.imread("knife.jpg")
 img = cv2.resize(img, (800, 600)) 
 
 # person detect

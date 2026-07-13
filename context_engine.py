@@ -2,28 +2,6 @@
 context_engine.py
 --------------------------------------------------------------------------------
 Context-Aware Threat Assessment Engine for the Real-Time Surveillance System.
-
-Instead of raising an alarm on ANY single detection, this engine COMBINES every
-signal (violence, weapons, number of people, time of day, dwell time) and decides
-an appropriate RESPONSE LEVEL. This is the core false-alarm-reduction logic.
-
-RESPONSE TIERS (severity, low -> high):
-    IGNORE  - do nothing
-    LOG     - silently record to the database (no popup, no sound)
-    NOTIFY  - desktop notification + log (operator should look)
-    ALARM   - siren + notification + log (immediate threat)
-
-DESIGN PRINCIPLES (these are the defense talking points):
-    1. Persistence  - violence must be SUSTAINED, not a 1-frame blip
-                      -> a playful pat while laughing never alarms.
-    2. Combination  - a lone signal is weak; combined signals escalate
-                      -> a lone knife is logged; a knife WITH violence alarms.
-    3. Context      - the same signal means different things by time/situation
-                      -> a knife in a shop by day = normal; after hours = suspicious.
-    4. Cooldown     - the same event is not repeated
-                      -> a knife sitting in a shop does NOT spam 1000 notifications.
-    5. Confidence   - low-confidence detections are ignored
-                      -> blurry "maybe a gun" doesn't trigger anything.
 """
 import time
 from collections import deque
@@ -61,8 +39,6 @@ class ThreatAssessor:
 
     # ---------- helper rules ----------
     def _sustained_violence(self, prob):
-        """True only if violence persists for several frames in a row.
-        A hug spikes high briefly -> streak resets -> filtered. A fight sustains -> passes."""
         if prob >= self.violence_threshold:
             self._violent_streak += 1
         else:
@@ -70,11 +46,9 @@ class ThreatAssessor:
         return self._violent_streak >= self.violence_streak_needed
 
     def _strong_weapons(self, weapons):
-        """PRINCIPLE 5: keep only confident weapon detections."""
         return [name for (name, conf) in weapons if conf >= self.weapon_conf]
 
     def _loitering(self, track_ids, now, after_hours):
-        """A tracked person staying longer than dwell_seconds (after hours only)."""
         if not after_hours:
             self._track_start.clear()
             return False
@@ -85,7 +59,6 @@ class ThreatAssessor:
         return False
 
     def _cooldown_ok(self, alert_type, now, cooldown):
-        """PRINCIPLE 4: True only if enough time passed since we last acted on this type."""
         if now - self._last_fire.get(alert_type, -1e9) >= cooldown:
             self._last_fire[alert_type] = now
             return True
@@ -95,55 +68,46 @@ class ThreatAssessor:
     def assess(self, violence_prob=0.0, weapons=None, person_count=0,
                track_ids=None, current_hour=None, now=None,
                event_active=False, event_expected_crowd=0):
-        """
-        Combine all signals into ONE response decision.
-        Returns: (tier, alert_type, message, confidence)
-        """
         weapons = weapons or []
         track_ids = track_ids or []
         now = time.time() if now is None else now
         if current_hour is None:
             current_hour = time.localtime(now).tm_hour
         after_hours = current_hour >= self.closing_hour
-        # EVENT CONTEXT: a scheduled event makes activity at its time normal.
-        # Violence/weapons still alarm always -- events only relax crowd/time context.
+        
         if event_active:
-            after_hours = False                     # event legitimizes the hour
+            after_hours = False                     
         crowd_limit = max(3, event_expected_crowd) if event_active else 3
 
         sustained = self._sustained_violence(violence_prob)
         guns_knives = self._strong_weapons(weapons)
         has_weapon = len(guns_knives) > 0
 
-        # ================= ESCALATION MATRIX (first match wins, high -> low) =================
+        # ================= ESCALATION MATRIX =================
 
-        # 1) weapon + sustained violence -> clearest real threat
+        # 1) weapon + sustained violence -> ALARM
         if has_weapon and sustained:
             return ALARM, "weapon+violence", f"ALARM: {guns_knives[0]} with violence!", violence_prob
 
-        # 2) sustained violence decision. We SMOOTH the person count so brief flicker
-        #    (a person leaving frame) doesn't misclassify a crowd as a small fight.
+        # 2) sustained violence decision
         self._people_hist.append(person_count)
-        smoothed_people = max(self._people_hist)      # steady view of how busy the scene is
+        smoothed_people = max(self._people_hist)      
         is_crowd = smoothed_people > self.fight_max_people and not event_active
 
         if sustained:
             if is_crowd:
-                # CROWD: our model is unreliable on dense scenes, so we NEVER auto-alarm here.
-                # We flag it for the operator to review instead (human makes the final call).
                 if self._cooldown_ok("crowd-motion", now, self.notify_cooldown):
                     return NOTIFY, "crowd-motion", "NOTIFY: High activity in a crowd (review)", 0.5
                 return IGNORE, "", "", 0.0
-            # NORMAL scene (few people) -> a real fight -> alarm
             return ALARM, "violence", "ALARM: Violence detected!", violence_prob
 
-        # 3) weapon among several people (PRINCIPLE 2: combined) -> notify
+        # 3) weapon among several people -> notify
         if has_weapon and person_count >= 2:
             if self._cooldown_ok("weapon-near-people", now, self.notify_cooldown):
                 return NOTIFY, "weapon-near-people", f"NOTIFY: {guns_knives[0]} near people", 0.7
             return IGNORE, "", "", 0.0
 
-        # 4) crowd after hours (PRINCIPLE 3: context) -> notify
+        # 4) crowd after hours -> notify
         if after_hours and person_count >= crowd_limit:
             if self._cooldown_ok("after-hours-crowd", now, self.notify_cooldown):
                 return NOTIFY, "after-hours-crowd", "NOTIFY: Crowd after working hours", 0.6
@@ -155,11 +119,10 @@ class ThreatAssessor:
                 return NOTIFY, "loitering", "NOTIFY: Loitering after hours", 0.5
             return IGNORE, "", "", 0.0
 
-        # 6) LONE weapon (e.g. knife in a shop) -> SILENT LOG ONLY, with cooldown (PRINCIPLE 4)
+        # 6) LONE weapon -> SILENT LOG
         if has_weapon:
             if self._cooldown_ok("weapon-seen", now, self.log_cooldown):
                 return LOG, "weapon-seen", f"logged: {guns_knives[0]} seen (monitoring)", 0.4
             return IGNORE, "", "", 0.0
 
-        # nothing significant
         return IGNORE, "", "", 0.0

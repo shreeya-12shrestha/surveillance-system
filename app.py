@@ -11,10 +11,10 @@ from ultralytics import YOLO
 
 from database import (init_db, log_alert, mark_false_alarm, count_after_hours, DATABASE,
                       init_events, add_event, get_all_events, get_active_event)
-from violence_detector import ViolenceDetector          # YOUR temporal violence model
-from context_engine import ThreatAssessor, IGNORE, LOG, NOTIFY, ALARM   # YOUR context engine
+from violence_detector import ViolenceDetector          
+from context_engine import ThreatAssessor, IGNORE, LOG, NOTIFY, ALARM   
 try:
-    from email_alert import send_email_alert          # emails the logged-in operator
+    from email_alert import send_email_alert          
 except Exception:
     send_email_alert = None
 
@@ -28,16 +28,16 @@ USE_WEBCAM = True
 VIDEO_PATH = "fight.mp4"
 
 # ----------------- DETECTION SETUP (loaded once) -----------------
-general_model = YOLO("yolov8n.pt")                                    # person detection (nano = faster)
-weapon_model = YOLO("best.pt")                                        # gun/knife detection
-violence_detector = ViolenceDetector("violence_mobilenet_lstm.pt")   # temporal violence model
-assessor = ThreatAssessor()                                          # context-aware decision engine
+general_model = YOLO("yolov8n.pt")                                    
+weapon_model = YOLO("best.pt")                                        
+violence_detector = ViolenceDetector("violence_mobilenet_lstm.pt")   
+assessor = ThreatAssessor()                                          
 
 WEAPON_KEYWORDS = ("gun", "knife", "knive", "pistol", "rifle", "handgun", "shotgun", "weapon", "blade")
 ACTION_COOLDOWN = 5.0
 last_action = {}
-_last_email = {"t": 0.0}   # throttle emails: at most one per minute
-DISMISS_SECRET = "kec_surveillance_2026"   # MUST match email_alert.py
+_last_email = {"t": 0.0}   
+DISMISS_SECRET = "kec_surveillance_2026"   
 TIER_COLOR = {LOG: (0, 255, 255), NOTIFY: (0, 165, 255), ALARM: (0, 0, 255)}
 
 
@@ -48,11 +48,10 @@ def trigger_audio_alarm():
         if current_os == "Windows":
             import winsound
             winsound.Beep(1000, 200)
-        elif current_os == "Darwin": # Mac OS
-            # The '&' runs it in the background so it doesn't freeze the video feed
+        elif current_os == "Darwin": 
             os.system('afplay /System/Library/Sounds/Glass.aiff &')
-        else: # Linux or other
-            print('\a') # Triggers terminal bell
+        else: 
+            print('\a') 
     except Exception as e:
         print(f"[audio] skip: {e}")
 
@@ -67,7 +66,7 @@ def _should_act(alert_type):
 
 
 def _detect_persons(frame):
-    """Fast person detection + tracking (nano model). Runs often."""
+    """Fast person detection + tracking (nano model)."""
     boxes, count, ids = [], 0, []
     try:
         pr = general_model.track(frame, classes=[0], conf=0.5, persist=True, verbose=False, imgsz=320)[0]
@@ -85,7 +84,7 @@ def _detect_persons(frame):
 
 
 def _detect_weapons(frame):
-    """Weapon detection (heavier model). Runs RARELY -- weapons are rare + mostly static."""
+    """Weapon detection (heavier model)."""
     boxes, weapons = [], []
     try:
         wr = weapon_model(frame, conf=0.5, verbose=False, imgsz=320)[0]
@@ -93,7 +92,7 @@ def _detect_weapons(frame):
                                    wr.boxes.cls.cpu().numpy().astype(int),
                                    wr.boxes.conf.cpu().numpy()):
             name = weapon_model.names[int(cls)]
-            if any(k in name.lower() for k in WEAPON_KEYWORDS):   # only real weapons
+            if any(k in name.lower() for k in WEAPON_KEYWORDS):   
                 x1, y1, x2, y2 = xyxy
                 boxes.append((x1, y1, x2, y2, f"{name} {conf:.2f}", (0, 0, 255)))
                 weapons.append((name.lower(), float(conf)))
@@ -103,7 +102,7 @@ def _detect_weapons(frame):
 
 
 def _draw_boxes(img, boxes):
-    """Draw cached boxes onto a frame (used on skipped frames)."""
+    """Draw cached boxes onto a frame."""
     for (x1, y1, x2, y2, label, color) in boxes:
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         cv2.putText(img, label, (x1, max(15, y1 - 6)),
@@ -113,7 +112,7 @@ def _draw_boxes(img, boxes):
 
 _event_cache = {"checked": 0.0, "active": None}
 def current_event():
-    """Return (name, expected_crowd) if an event is active now, else None. Cached 30s."""
+    """Return (name, expected_crowd) if an event is active now."""
     t = time.time()
     if t - _event_cache["checked"] > 30:
         _event_cache["active"] = get_active_event()
@@ -122,25 +121,21 @@ def current_event():
 
 
 def generate_frames(operator_email=None, source=None, operator_username="system"):
-    """Live feed: reads, detects, and yields frames. Stops AUTOMATICALLY when the
-    browser disconnects (no background thread -> no alarms after logout)."""
-    
-    # Optional: If you are using a CCTV camera, uncomment the next line and replace '0' below
-    # cctv_url = "rtsp://admin:SecurePass2026@192.168.1.150:554/cam/realmonitor?channel=1&subtype=1"
+    """Live feed: reads, detects, and yields frames."""
     cctv_url = "rtsp://admin:YourPassword@192.168.1.150:554/Streaming/Channels/101"
     
-    # Safest selection logic:
     if source == 'cctv':
-        camera = cv2.VideoCapture(cctv_url)  # 1. Use CCTV if specifically requested
+        camera = cv2.VideoCapture(cctv_url)  
     elif source:
-        camera = cv2.VideoCapture(source)    # 2. Use demo.mp4 if requested
+        camera = cv2.VideoCapture(source)    
     else:
-        camera = cv2.VideoCapture(0)
+        # NOTE: If OBS Virtual Camera doesn't show up, change this 0 to a 1 or 2
+        camera = cv2.VideoCapture(1)
     
     violence_detector.buffer.clear(); violence_detector.prob_hist.clear(); violence_detector._count = 0
     fail_count = 0
-    DETECT_EVERY = 15  # Optimized person detection frequency
-    WEAPON_EVERY = 10  # Optimized weapon detection frequency 
+    DETECT_EVERY = 15  
+    WEAPON_EVERY = 10  
     frame_no = 0
     person_boxes, weapon_boxes = [], []
     person_count, track_ids, weapons = 0, [], []
@@ -149,13 +144,12 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
         while True:
             success, frame = camera.read()
             if not success:
-                if source:  # VIDEO FILE -> loop back to the start
+                if source and source != 'cctv':  
                     camera.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     fail_count += 1
                     if fail_count > 5:
                         break
                     continue
-                # CCTV/Network drop handling: wait a fraction of a second and try again
                 time.sleep(0.1)
                 continue
                 
@@ -186,17 +180,16 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
                             0.8, TIER_COLOR.get(tier, (0, 0, 255)), 2)
                             
                 if _should_act(alert_type):
-                    # Pass the logged-in operator's username to the database logger
                     new_id = log_alert(alert_type, conf, operator_username)
                     
                     if tier == ALARM:
                         trigger_audio_alarm()
                     
                     if operator_email and send_email_alert and (time.time() - _last_email["t"] > 60):
-                        _last_email["t"] = time.time()  # max ONE email per minute
+                        _last_email["t"] = time.time()  
                         threading.Thread(target=send_email_alert,
                                          args=(operator_email, message, new_id),
-                                         daemon=True).start()  # non-blocking
+                                         daemon=True).start()  
 
             cv2.putText(img, f"Violence: {violence_prob:.2f}", (20, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7,
@@ -205,9 +198,10 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
             ret, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
     finally:
-        camera.release()  # always release when the browser disconnects
+        if camera is not None:
+            camera.release()
 
-# ================= SUDARSHAN'S ROUTES =================
+# ================= SERVER ROUTES =================
 
 @app.route('/')
 def index():
@@ -462,7 +456,7 @@ def events():
         cursor = conn.cursor()
         
         cursor.execute("SELECT * FROM events ORDER BY event_date DESC")
-        active_events = cursor.fetchall()
+        active_events = cursor.fetchall() 
         
         cursor.execute("SELECT * FROM deleted_events ORDER BY deleted_at DESC")
         archived_events = cursor.fetchall()

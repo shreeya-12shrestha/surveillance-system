@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <title>Colony Map</title>
+</head>
+<body>
+    <nav style="position: relative;">
+        <div><strong>SURVEILLANCE DESK</strong></div>
+        
+        <div style="position: absolute; left: 50%; transform: translateX(-50%); text-transform: uppercase;">
+            <strong>USER: {{ username }}</strong>
+        </div>
+
+        <div>
+            <a href="{{ url_for('dashboard') }}">Dashboard</a>
+            <a href="{{ url_for('map_view') }}" style="color: white; font-weight: bold;">Colony Map</a>
+            <a href="{{ url_for('alerts_history') }}">Alerts History</a>
+            
+            {% if role|lower == 'admin' %}
+                <a href="{{ url_for('users') }}">Manage Users</a>
+                <a href="{{ url_for('events') }}">Events</a>
+            {% endif %}
+            
+            <a href="{{ url_for('logout') }}" style="color: #f87171;">Logout</a>
+        </div>
+    </nav>
+    
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}{% endif %}
+        {% endwith %}
+
+        <!-- TOP: Create/Join -->
+        <div class="card" style="margin-bottom: 25px;">
+            <div style="display: flex; gap: 20px;">
+                <div style="flex: 1;">
+                    <h3>Join Colony</h3>
+                    <form action="{{ url_for('join_colony_route') }}" method="POST">
+                        <input type="text" name="join_code" placeholder="Enter Join Code" required>
+                        <button type="submit">Join</button>
+                    </form>
+                </div>
+                <div style="flex: 1;">
+                    <h3>Create Colony</h3>
+                    <form action="{{ url_for('create_colony_route') }}" method="POST">
+                        <input type="text" name="colony_name" placeholder="Colony Name" required>
+                        <button type="submit" class="btn-success">Create</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- LIST: Joined Colonies -->
+        <div class="card">
+            <h3>My Joined Colonies</h3>
+            {% if colony %}
+            <ul style="list-style: none; padding: 0;">
+                <li>
+                    <details>
+                        <summary style="cursor: pointer; padding: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-weight: bold;">
+                            {{ colony.name }}
+                        </summary>
+                        <div style="padding: 15px; border: 1px solid #e2e8f0; margin-top: 5px;">
+                            <p>Join Code: <strong>{{ colony.join_code }}</strong></p>
+                            
+                            <h4>Colony Members:</h4>
+                            <ul style="margin-bottom: 15px;">
+                                {% for m in members %}
+                                    <li>{{ m.username }}</li>
+                                {% endfor %}
+                            </ul>
+
+                            <div id="colony-map" style="height: 300px; width: 100%;"></div>
+                        </div>
+                    </details>
+                </li>
+            </ul>
+            {% else %}
+            <p>You have not joined any colonies yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        {% if colony %}
+        var map = L.map('colony-map').setView([27.7, 85.3], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        {% if user.latitude and user.longitude %}
+            L.marker([{{ user.latitude }}, {{ user.longitude }}]).addTo(map)
+                .bindPopup("You ({{ username }})").openPopup();
+        {% endif %}
+        
+        {% for m in members %}
+            {% if m.username != username %}
+                L.marker([{{ m.latitude }}, {{ m.longitude }}]).addTo(map)
+                    .bindPopup("{{ m.username }}");
+            {% endif %}
+        {% endfor %}
+        {% endif %}
+    </script>
+</body>
+</html>

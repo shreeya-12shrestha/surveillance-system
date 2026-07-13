@@ -5,12 +5,13 @@ import time
 import platform
 import os
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, Response, flash, render_template_string
+from flask import Flask, jsonify, render_template, request, redirect, url_for, session, Response, flash, render_template_string
 from werkzeug.security import generate_password_hash, check_password_hash
 from ultralytics import YOLO
 
 from database import (init_db, log_alert, mark_false_alarm, count_after_hours, DATABASE,
-                      init_events, add_event, get_all_events, get_active_event)
+                      init_events, add_event, get_all_events, get_active_event,
+                      create_colony, join_colony_by_code, update_user_location,mark_alert_broadcasted)
 from violence_detector import ViolenceDetector          
 from context_engine import ThreatAssessor, IGNORE, LOG, NOTIFY, ALARM   
 try:
@@ -130,7 +131,7 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
         camera = cv2.VideoCapture(source)    
     else:
         # NOTE: If OBS Virtual Camera doesn't show up, change this 0 to a 1 or 2
-        camera = cv2.VideoCapture(1)
+        camera = cv2.VideoCapture(0)
     
     violence_detector.buffer.clear(); violence_detector.prob_hist.clear(); violence_detector._count = 0
     fail_count = 0
@@ -300,47 +301,38 @@ def video_feed():
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+
 @app.route('/get_alerts')
 def get_alerts():
-    if 'username' not in session:
-        return "Unauthorized", 401
-        
-    login_time = session.get('login_time', '1970-01-01 00:00:00')
-    
-    with sqlite3.connect(DATABASE) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM alerts WHERE timestamp >= ? ORDER BY timestamp DESC", (login_time,))
-        alerts = cursor.fetchall()
-    row_template = """
-    {% for alert in alerts %}
-    <tr class="{% if alert.is_false_alarm %}false-alarm-row{% else %}alert-row{% endif %}">
-        <td style="font-size: 0.8rem; color: #64748b;">{{ alert.timestamp.split()[1] if alert.timestamp else '' }}</td>
-        <td style="font-weight: bold; text-transform: capitalize;">{{ alert.alert_type.replace('-', ' ') }}</td>
-        <td style="font-size: 0.85rem;">{{ "%.0f"|format(alert.confidence * 100) }}%</td>
-        <td>
-            {% if alert.is_false_alarm %}
-                <span style="color: #64748b; font-weight: bold; font-size: 0.85rem;">Dismissed</span>
-            {% else %}
-                <span style="color: #dc2626; font-weight: bold; font-size: 0.85rem;">Active</span>
-            {% endif %}
-        </td>
-        <td>
-            {% if not alert.is_false_alarm %}
-            <form action="{{ url_for('flag_false_alarm', alert_id=alert.id) }}" method="POST" style="margin: 0;">
-                <button type="submit" class="btn" style="background:#64748b; padding: 4px 8px; font-size: 0.75rem;">Mark False</button>
-            </form>
-            {% endif %}
-        </td>
-    </tr>
-    {% else %}
-    <tr>
-        <td colspan="5" style="color: #64748b; text-align: center; padding: 30px;">No active security events logged.</td>
-    </tr>
-    {% endfor %}
-    """
-    return render_template_string(row_template, alerts=alerts)
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    alerts = conn.execute("SELECT * FROM alerts ORDER BY timestamp DESC LIMIT 10").fetchall()
+    conn.close()
 
+    rows_html = ""
+    for a in alerts:
+        # Determine styling: false-alarm-row if marked (a[4]==1)
+        row_class = 'false-alarm-row' if a['is_false_alarm'] else 'alert-row'
+        
+        # Build the HTML row string with both buttons always visible
+        rows_html += f"""
+        <tr class="{row_class}">
+            <td>{a['timestamp'].split()[1]}</td>
+            <td style="text-transform: capitalize;">{a['alert_type'].replace('-', ' ')}</td>
+            <td>{int(a['confidence']*100)}%</td>
+            <td>
+                <div style="display: flex; gap: 5px;">
+                    <form action="/mark_false_alarm/{a['id']}" method="POST" style="margin: 0;">
+                        <button type="submit" class="btn" style="padding: 4px 8px; font-size: 0.8rem; background: #64748b; color: white; border: none; border-radius: 4px; cursor: pointer;">Mark False</button>
+                    </form>
+                    <form action="/broadcast/{a['id']}" method="POST" style="margin: 0;">
+                        <button type="submit" class="btn" style="padding: 4px 8px; font-size: 0.8rem; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">Broadcast</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        """
+    return rows_html
 
 @app.route('/alerts_history')
 def alerts_history():
@@ -536,6 +528,92 @@ def database_viewer():
                            events=all_events, 
                            deleted_events=del_events,
                            alerts=all_alerts)
+@app.route('/map')
+def map_view():
+    if 'username' not in session: return redirect(url_for('index'))
+    with sqlite3.connect(DATABASE) as conn:
+        conn.row_factory = sqlite3.Row
+        user = conn.execute("SELECT * FROM users WHERE username=?", (session['username'],)).fetchone()
+        colony = conn.execute("SELECT * FROM colonies WHERE id=?", (user['colony_id'],)).fetchone() if user['colony_id'] else None
+        
+        # Ensure username is selected so it can be displayed in the list
+        members = conn.execute("SELECT username, latitude, longitude FROM users WHERE colony_id=? AND latitude IS NOT NULL", 
+                               (user['colony_id'],)).fetchall() if user['colony_id'] else []
+        
+    return render_template('map.html', username=session['username'], role=session['role'], user=user, colony=colony, members=members)
+
+@app.route('/update_location', methods=['POST'])
+def update_loc():
+    if 'username' in session:
+        data = request.get_json()
+        update_user_location(session['username'], data['lat'], data['lng'])
+        return jsonify({"status": "success"})
+    return jsonify({"status": "unauthorized"}), 401
+
+@app.route('/broadcast/<int:alert_id>', methods=['POST'])
+def broadcast_alert(alert_id):
+    if 'username' not in session:
+        return redirect(url_for('index'))
+
+    with sqlite3.connect(DATABASE) as conn:
+        conn.row_factory = sqlite3.Row
+        # Fetch alert and operator info
+        alert = conn.execute("SELECT * FROM alerts WHERE id=?", (alert_id,)).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE username=?", (session['username'],)).fetchone()
+        
+        if not alert or not user or not user['colony_id']:
+            flash("Cannot broadcast: User not in a colony.", "error")
+            return redirect(url_for('dashboard'))
+
+        # Fetch other members' emails
+        members = conn.execute("SELECT email FROM users WHERE colony_id=? AND username!=?", 
+                               (user['colony_id'], session['username'])).fetchall()
+
+    if members:
+        # Trigger your email logic (Ensure send_colony_broadcast is imported)
+        from email_alert import send_colony_broadcast
+        emails = [m['email'] for m in members]
+        send_colony_broadcast(emails, alert['alert_type'], session['username'], 
+                              user['latitude'], user['longitude'], alert_id)
+        
+        # Mark as broadcasted in DB
+        mark_alert_broadcasted(alert_id)
+        flash(f"Broadcast sent to {len(emails)} colony members!", "success")
+    else:
+        flash("No other members found in your colony to notify.", "info")
+
+    return redirect(url_for('dashboard'))
+
+@app.route('/colony/create', methods=['POST'])
+def create_colony_route():
+    colony_id, code = create_colony(request.form['colony_name'])
+    sqlite3.connect(DATABASE).execute("UPDATE users SET colony_id=? WHERE username=?", (colony_id, session['username']))
+    flash(f"Colony created! Share this Join Code: {code}", "success")
+    return redirect(url_for('map_view'))
+
+@app.route('/colony/join', methods=['POST'])
+def join_colony_route():
+    if join_colony_by_code(session['username'], request.form['join_code']): flash("Joined!", "success")
+    else: flash("Invalid Code.", "error")
+    return redirect(url_for('map_view'))
+
+@app.route('/email_broadcast/<int:alert_id>/<token>')
+def email_broadcast(alert_id, token):
+    if token != DISMISS_SECRET: return "Unauthorized", 403
+    
+    # Logic: Mark broadcasted, find colony members, and send emails
+    mark_alert_broadcasted(alert_id)
+    with sqlite3.connect(DATABASE) as conn:
+        conn.row_factory = sqlite3.Row
+        # Assuming you store the operator who triggered the original alert
+        alert = conn.execute("SELECT operator_username FROM alerts WHERE id=?", (alert_id,)).fetchone()
+        user = conn.execute("SELECT colony_id, latitude, longitude FROM users WHERE username=?", (alert['operator_username'],)).fetchone()
+        
+        if user and user['colony_id']:
+            members = conn.execute("SELECT email FROM users WHERE colony_id=? AND username!=?", (user['colony_id'], alert['operator_username'])).fetchall()
+            threading.Thread(target=send_colony_broadcast, args=([m['email'] for m in members], "Verified Threat", alert['operator_username'], user['latitude'], user['longitude'], alert_id), daemon=True).start() # type: ignore
+            
+    return "<h1>Broadcast Sent!</h1><p>Colony members have been notified.</p>"
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001, threaded=True)

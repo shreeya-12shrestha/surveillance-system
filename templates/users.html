@@ -7,20 +7,26 @@
 <body>
     <!-- Updated Navbar to match the centered design of the Dashboard -->
     <nav style="position: relative;">
-        <div><strong>SURVEILLANCE DESK</strong></div>
-        
-        <div style="position: absolute; left: 50%; transform: translateX(-50%); text-transform: uppercase;">
-            <strong>USER: {{ username }}</strong>
-        </div>
+    <div><strong>SURVEILLANCE DESK</strong></div>
+    
+    <div style="position: absolute; left: 50%; transform: translateX(-50%); text-transform: uppercase;">
+        <strong>USER: {{ username }}</strong>
+    </div>
 
-        <div>
-            <a href="{{ url_for('dashboard') }}">Dashboard</a>
-            <a href="{{ url_for('alerts_history') }}">Alerts History</a>
-            <a href="{{ url_for('users') }}" style="color: white; font-weight: bold;">Manage Users</a>
+    <div>
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <!-- Ensure this link is in every file -->
+        <a href="{{ url_for('map_view') }}">Colony Map</a>
+        <a href="{{ url_for('alerts_history') }}">Alerts History</a>
+        
+        {% if role|lower == 'admin' %}
+            <a href="{{ url_for('users') }}">Manage Users</a>
             <a href="{{ url_for('events') }}">Events</a>
-            <a href="{{ url_for('logout') }}" style="color: #f87171;">Logout</a>
-        </div>
-    </nav>
+        {% endif %}
+        
+        <a href="{{ url_for('logout') }}" style="color: #f87171;">Logout</a>
+    </div>
+</nav>
     
     <div class="container" style="color: black;">
         

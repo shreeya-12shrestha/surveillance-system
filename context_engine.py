@@ -73,7 +73,13 @@ class ThreatAssessor:
         now = time.time() if now is None else now
         if current_hour is None:
             current_hour = time.localtime(now).tm_hour
-        after_hours = current_hour >= self.closing_hour
+        after_hours = (current_hour >= self.closing_hour) or (current_hour < 5)
+        
+        # NEW: Log single person appearing after hours
+        if after_hours and person_count >= 1:
+            if self._cooldown_ok("after-hours-person", now, self.log_cooldown):
+                return LOG, "after-hours-person", f"logged: Single person detected after hours", 0.5
+            return IGNORE, "", "", 0.0
         
         if event_active:
             after_hours = False                     

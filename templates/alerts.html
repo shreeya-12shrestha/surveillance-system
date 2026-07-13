@@ -1,25 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="utf-8">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>Alerts History</title>
 </head>
 <body>
     <nav style="position: relative;">
-        <div><strong>SURVEILLANCE DESK</strong></div>
-        
-        <div style="position: absolute; left: 50%; transform: translateX(-50%); text-transform: uppercase;">
-            <strong>USER: {{ username }}</strong>
-        </div>
+    <div><strong>SURVEILLANCE DESK</strong></div>
+    
+    <div style="position: absolute; left: 50%; transform: translateX(-50%); text-transform: uppercase;">
+        <strong>USER: {{ username }}</strong>
+    </div>
 
-        <div>
-            <a href="{{ url_for('dashboard') }}">Dashboard</a>
-            <a href="{{ url_for('alerts_history') }}" style="color: white; font-weight: bold;">Alerts History</a>
-            {% if role|lower == 'admin' %}<a href="{{ url_for('users') }}">Manage Users</a>{% endif %}
-            {% if role|lower == 'admin' %}<a href="{{ url_for('events') }}">Events</a>{% endif %}
-            <a href="{{ url_for('logout') }}" style="color: #f87171;">Logout</a>
-        </div>
-    </nav>
+    <div>
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <!-- Ensure this link is in every file -->
+        <a href="{{ url_for('map_view') }}">Colony Map</a>
+        <a href="{{ url_for('alerts_history') }}">Alerts History</a>
+        
+        {% if role|lower == 'admin' %}
+            <a href="{{ url_for('users') }}">Manage Users</a>
+            <a href="{{ url_for('events') }}">Events</a>
+        {% endif %}
+        
+        <a href="{{ url_for('logout') }}" style="color: #f87171;">Logout</a>
+    </div>
+</nav>
     
     <div class="container">
         <div class="card">

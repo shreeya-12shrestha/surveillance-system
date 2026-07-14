@@ -131,7 +131,7 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
         camera = cv2.VideoCapture(source)    
     else:
         # NOTE: If OBS Virtual Camera doesn't show up, change this 0 to a 1 or 2
-        camera = cv2.VideoCapture(1)
+        camera = cv2.VideoCapture(0)
     
     #violence_detector.buffer.clear(); violence_detector.prob_hist.clear(); violence_detector._count = 0
     fail_count = 0

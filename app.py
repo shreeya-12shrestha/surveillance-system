@@ -12,7 +12,7 @@ from ultralytics import YOLO
 from database import (init_db, log_alert, mark_false_alarm, count_after_hours, DATABASE,
                       init_events, add_event, get_all_events, get_active_event,
                       create_colony, join_colony_by_code, update_user_location,mark_alert_broadcasted)
-from violence_detector import ViolenceDetector          
+#from violence_detector import ViolenceDetector          
 from context_engine import ThreatAssessor, IGNORE, LOG, NOTIFY, ALARM   
 try:
     from email_alert import send_email_alert          
@@ -31,7 +31,7 @@ VIDEO_PATH = "fight.mp4"
 # ----------------- DETECTION SETUP (loaded once) -----------------
 general_model = YOLO("yolov8n.pt")                                    
 weapon_model = YOLO("best.pt")                                        
-violence_detector = ViolenceDetector("violence_mobilenet_lstm.pt")   
+#violence_detector = ViolenceDetector("violence_mobilenet_lstm.pt")   
 assessor = ThreatAssessor()                                          
 
 WEAPON_KEYWORDS = ("gun", "knife", "knive", "pistol", "rifle", "handgun", "shotgun", "weapon", "blade")
@@ -70,7 +70,7 @@ def _detect_persons(frame):
     """Fast person detection + tracking (nano model)."""
     boxes, count, ids = [], 0, []
     try:
-        pr = general_model.track(frame, classes=[0], conf=0.5, persist=True, verbose=False, imgsz=320)[0]
+        pr = general_model.track(frame, classes=[0], conf=0.6, persist=True, verbose=False, imgsz=640, tracker="bytetrack.yaml")[0]
         count = len(pr.boxes)
         ids = pr.boxes.id.int().tolist() if pr.boxes.id is not None else []
         id_list = ids if ids else [None] * count
@@ -131,9 +131,9 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
         camera = cv2.VideoCapture(source)    
     else:
         # NOTE: If OBS Virtual Camera doesn't show up, change this 0 to a 1 or 2
-        camera = cv2.VideoCapture(0)
+        camera = cv2.VideoCapture(1)
     
-    violence_detector.buffer.clear(); violence_detector.prob_hist.clear(); violence_detector._count = 0
+    #violence_detector.buffer.clear(); violence_detector.prob_hist.clear(); violence_detector._count = 0
     fail_count = 0
     DETECT_EVERY = 15  
     WEAPON_EVERY = 10  
@@ -157,7 +157,7 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
             fail_count = 0
             frame = cv2.resize(frame, (640, 480))
 
-            is_violent, violence_prob = violence_detector.update(frame)
+            #nt, violence_prob = violence_detector.update(frame)
 
             frame_no += 1
             if frame_no % DETECT_EVERY == 0:
@@ -169,7 +169,7 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
 
             ev = current_event()
             tier, alert_type, message, conf = assessor.assess(
-                violence_prob=violence_prob, weapons=weapons,
+                #violence_prob=violence_prob, weapons=weapons,
                 person_count=person_count, track_ids=track_ids,
                 current_hour=datetime.now().hour,
                 event_active=ev is not None,
@@ -192,9 +192,9 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
                                          args=(operator_email, message, new_id),
                                          daemon=True).start()  
 
-            cv2.putText(img, f"Violence: {violence_prob:.2f}", (20, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0, 0, 255) if is_violent else (0, 255, 0), 2)
+            #cv2.putText(img, f"Violence: {violence_prob:.2f}", (20, 90),
+                        #cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        #(0, 0, 255) if is_violent else (0, 255, 0), 2)
 
             ret, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')

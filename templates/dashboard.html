@@ -6,25 +6,26 @@
 </head>
 <body>
     <nav style="position: relative;">
-        <div><strong>SURVEILLANCE DESK</strong></div>
-        
-        <div style="position: absolute; left: 50%; transform: translateX(-50%); text-transform: uppercase;">
-            <strong>USER: {{ username }}</strong>
-        </div>
+    <div><strong>SURVEILLANCE DESK</strong></div>
+    
+    <div style="position: absolute; left: 50%; transform: translateX(-50%); text-transform: uppercase;">
+        <strong>USER: {{ username }}</strong>
+    </div>
 
-        <div>
-            <a href="{{ url_for('dashboard') }}">Dashboard</a>
-            <a href="{{ url_for('map_view') }}">Colony Map</a>
-            <a href="{{ url_for('alerts_history') }}">Alerts History</a>
-            
-            {% if role|lower == 'admin' %}
-                <a href="{{ url_for('users') }}">Manage Users</a>
-                <a href="{{ url_for('events') }}">Events</a>
-            {% endif %}
-            
-            <a href="{{ url_for('logout') }}" style="color: #f87171;">Logout</a>
-        </div>
-    </nav>
+    <div>
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <!-- Ensure this link is in every file -->
+        <a href="{{ url_for('map_view') }}">Colony Map</a>
+        <a href="{{ url_for('alerts_history') }}">Alerts History</a>
+        
+        {% if role|lower == 'admin' %}
+            <a href="{{ url_for('users') }}">Manage Users</a>
+            <a href="{{ url_for('events') }}">Events</a>
+        {% endif %}
+        
+        <a href="{{ url_for('logout') }}" style="color: #f87171;">Logout</a>
+    </div>
+</nav>
     
     <div class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -53,28 +54,31 @@
             <div class="card">
                 <h3>Alerts</h3>
                 <div style="max-height: 480px; overflow-y: auto; padding-right: 5px; margin-top: 15px;">
-                    <table style="width: 100%;">
-                        <tbody id="alerts-tbody">
-                            {% for a in alerts %}
-                            <tr class="{{'false-alarm-row' if a[4] else 'alert-row'}}">
-                                <td>{{a[1].split()[1]}}</td>
-                                <td style="text-transform: capitalize;">{{a[2].replace('-', ' ')}}</td>
-                                <td>{{(a[3]*100)|int}}%</td>
-                                <td>
-                                    <div style="display: flex; gap: 5px;">
-                                        <form action="/mark_false_alarm/{{a[0]}}" method="POST" style="margin: 0;">
-                                            <button type="submit" class="btn" style="padding: 4px 8px; font-size: 0.8rem; background: #64748b;">Mark False</button>
-                                        </form>
-                                        <form action="/broadcast/{{a[0]}}" method="POST" style="margin: 0;">
-                                            <button type="submit" class="btn" style="padding: 4px 8px; font-size: 0.8rem; background: #dc2626;">Broadcast</button>
-                                        </form>
-                                    </div>
-                                </td>
-                            </tr>
-                            {% else %}
-                            <tr><td colspan="4" style="text-align: center; color: #64748b; padding: 20px;">No alerts logged yet.</td></tr>
-                            {% endfor %}
-                        </tbody>
+                    <table id="alerts-tbody">
+                        {% for a in alerts %}
+                        <tr class="{{'false-alarm-row' if a[4] else 'alert-row'}}">
+                            <td>{{a[1].split()[1]}}</td>
+                            <td style="text-transform: capitalize;">{{a[2].replace('-', ' ')}}</td>
+                            <td>{{(a[3]*100)|int}}%</td>
+                            <td>
+                                {% if not a[4] %}
+                                <div style="display: flex; gap: 5px;">
+                                    <form action="/mark_false_alarm/{{a[0]}}" method="POST" style="margin: 0;">
+                                        <button type="submit" class="btn" style="padding: 4px 8px; font-size: 0.8rem; background: #64748b;">Mark False</button>
+                                    </form>
+                                    <!-- NEW: Broadcast Button -->
+                                    <form action="/broadcast/{{a[0]}}" method="POST" style="margin: 0;">
+                                    <button type="submit" class="btn btn-danger" style="padding: 4px 8px; font-size: 0.8rem;">Broadcast</button>
+                                </form>
+                                </div>
+                                {% else %}
+                                <span style="color: #64748b; font-weight: bold; font-size: 0.85rem;">Dismissed</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="4" style="text-align: center; color: #64748b; padding: 20px;">No alerts logged yet.</td></tr>
+                        {% endfor %}
                     </table>
                 </div>
             </div>
@@ -87,7 +91,7 @@
             fetch("/get_alerts").then(r => r.text()).then(h => document.getElementById('alerts-tbody').innerHTML = h)
         }, 3000);
 
-        // Capture user location
+        // NEW: Automatically capture user location and send to backend
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(position => {
                 fetch('/update_location', {
@@ -95,8 +99,23 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({lat: position.coords.latitude, lng: position.coords.longitude})
                 });
-            }, (error) => console.log("Location access denied."));
+            });
         }
+    </script>
+    <script>
+    // Automatically capture user location and send to backend
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+            fetch('/update_location', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    lat: position.coords.latitude, 
+                    lng: position.coords.longitude
+                })
+            });
+        }, (error) => console.log("Location access denied."));
+    }
     </script>
 </body>
 </html>

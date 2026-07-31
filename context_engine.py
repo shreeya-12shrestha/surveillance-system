@@ -69,7 +69,7 @@ class ThreatAssessor:
             if self._cooldown_ok("weapon-near-people", now, self.notify_cooldown):
                 return NOTIFY, "weapon-near-people", f"NOTIFY: {guns_knives[0]} near people", 0.7
             return IGNORE, "", "", 0.0
-
+            
         if self._loitering(track_ids, now, after_hours):
             if self._cooldown_ok("loitering", now, self.notify_cooldown):
                 return NOTIFY, "loitering", "NOTIFY: Loitering after hours", 0.5

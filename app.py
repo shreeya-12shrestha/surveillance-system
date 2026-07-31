@@ -4,6 +4,7 @@ import threading
 import time
 import platform
 import os
+import numpy as np
 from datetime import datetime
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session, Response, flash, render_template_string
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -41,6 +42,16 @@ _last_email = {"t": 0.0}
 DISMISS_SECRET = "kec_surveillance_2026"   
 TIER_COLOR = {LOG: (0, 255, 255), NOTIFY: (0, 165, 255), ALARM: (0, 0, 255)}
 
+
+def _check_intrusion(person_boxes, zone_polygon):
+    """Checks if the bottom-center (feet) of any person is inside the zone."""
+    for (x1, y1, x2, y2, label, color) in person_boxes:
+        feet_x = int((x1 + x2) / 2)
+        feet_y = y2 
+        # pointPolygonTest returns 1 if inside, 0 if on edge, -1 if outside
+        if cv2.pointPolygonTest(zone_polygon, (feet_x, feet_y), False) >= 0:
+            return True
+    return False
 
 def trigger_audio_alarm():
     """Cross-platform function to play an alarm sound."""
@@ -131,7 +142,7 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
         camera = cv2.VideoCapture(source)    
     else:
         # NOTE: If OBS Virtual Camera doesn't show up, change this 0 to a 1 or 2
-        camera = cv2.VideoCapture(0)
+        camera = cv2.VideoCapture(1)
     
     #violence_detector.buffer.clear(); violence_detector.prob_hist.clear(); violence_detector._count = 0
     fail_count = 0
@@ -140,6 +151,11 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
     frame_no = 0
     person_boxes, weapon_boxes = [], []
     person_count, track_ids, weapons = 0, [], []
+    
+    display_text = ""
+    display_color = (0, 0, 0)
+    display_until = 0.0
+    TEXT_DURATION = 5.0
     
     try:
         while True:
@@ -167,23 +183,31 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
             
             img = _draw_boxes(frame.copy(), person_boxes + weapon_boxes)
 
+            
             ev = current_event()
             tier, alert_type, message, conf = assessor.assess(
-                #violence_prob=violence_prob, weapons=weapons,
+                #violence_prob=violence_prob, 
+                weapons=weapons,
                 person_count=person_count, track_ids=track_ids,
                 current_hour=datetime.now().hour,
                 event_active=ev is not None,
                 event_expected_crowd=(ev[1] if ev else 0)
             )
 
+            # ... existing assessor.assess() call ...
+
+            # --- REPLACE THE EXISTING TEXT DRAWING LOGIC WITH THIS ---
             if tier != IGNORE:
-                cv2.putText(img, message, (20, 50), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.8, TIER_COLOR.get(tier, (0, 0, 255)), 2)
+                # Capture the message and set the timer
+                display_text = message
+                display_color = TIER_COLOR.get(tier, (0, 0, 255))
+                display_until = time.time() + TEXT_DURATION
                             
                 if _should_act(alert_type):
                     new_id = log_alert(alert_type, conf, operator_username)
                     
-                    if tier == ALARM:
+                    # --- CHANGED: Now plays sound for both ALARM and NOTIFY ---
+                    if tier == ALARM or tier == NOTIFY:
                         trigger_audio_alarm()
                     
                     if operator_email and send_email_alert and (time.time() - _last_email["t"] > 60):
@@ -192,9 +216,11 @@ def generate_frames(operator_email=None, source=None, operator_username="system"
                                          args=(operator_email, message, new_id),
                                          daemon=True).start()  
 
-            #cv2.putText(img, f"Violence: {violence_prob:.2f}", (20, 90),
-                        #cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        #(0, 0, 255) if is_violent else (0, 255, 0), 2)
+            # Draw the text continuously until the timer expires
+            if time.time() < display_until:
+                cv2.putText(img, display_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8, display_color, 2)
+            # --------------------------------------------------------
 
             ret, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
@@ -519,6 +545,10 @@ def database_viewer():
 
     cursor.execute("SELECT * FROM alerts ORDER BY timestamp DESC")
     all_alerts = cursor.fetchall()
+    
+    # --- NEW: Fetch Colonies ---
+    cursor.execute("SELECT * FROM colonies")
+    all_colonies = cursor.fetchall()
 
     conn.close()
 
@@ -527,7 +557,10 @@ def database_viewer():
                            deleted_users=del_users,
                            events=all_events, 
                            deleted_events=del_events,
-                           alerts=all_alerts)
+                           alerts=all_alerts,
+                           colonies=all_colonies) # --- NEW: Pass to template ---
+    
+    
 @app.route('/map')
 def map_view():
     if 'username' not in session: return redirect(url_for('index'))
